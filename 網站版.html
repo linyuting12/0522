@@ -1,0 +1,1051 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chat with Arduino OLED & Pixel Games</title>
+    <style>
+        body {
+            font-family: 'VT323', monospace;
+            background-color: #f5f5f5;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            image-rendering: pixelated;
+            position: relative;
+            overflow: hidden;
+        }
+        h1 {
+            text-align: center;
+            color: #2a2a2a;
+            font-size: 32px;
+            text-transform: uppercase;
+            margin-bottom: 20px;
+        }
+        #chat-container {
+            border: 4px solid #2a2a2a;
+            padding: 10px;
+            height: 400px;
+            overflow-y: auto;
+            background-color: #fff;
+            margin-bottom: 20px;
+            image-rendering: pixelated;
+        }
+        .message {
+            margin: 8px 0;
+            padding: 8px;
+            border: 2px solid #2a2a2a;
+            font-size: 20px;
+        }
+        .user-message {
+            background-color: #87ceeb;
+            margin-left: 20%;
+            margin-right: 10px;
+        }
+        .ai-message {
+            background-color: #dcdcdc;
+            margin-right: 20%;
+            margin-left: 10px;
+        }
+        #input-container {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        #user-input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 3px solid #2a2a2a;
+            border-radius: 0;
+            background-color: #fff;
+            font-size: 20px;
+            font-family: 'VT323', monospace;
+            outline: none;
+        }
+        #send-button, #mic-button, #connect-button, #game-button, #music-button {
+            padding: 10px 20px;
+            border: 3px solid #2a2a2a;
+            border-radius: 0;
+            cursor: pointer;
+            font-size: 20px;
+            font-family: 'VT323', monospace;
+            color: #fff;
+        }
+        #send-button {
+            background-color: #4682b4;
+        }
+        #send-button:hover {
+            background-color: #4169e1;
+        }
+        #mic-button {
+            background-color: #ff4040;
+        }
+        #mic-button.recording {
+            background-color: #b22222;
+        }
+        #mic-button:hover {
+            background-color: #b22222;
+        }
+        #connect-button {
+            background-color: #228b22;
+        }
+        #connect-button:hover {
+            background-color: #006400;
+        }
+        #game-button, #music-button {
+            background-color: #ffa500;
+            display: none;
+        }
+        #game-button:hover, #music-button:hover {
+            background-color: #ff8c00;
+        }
+        #status {
+            margin-top: 10px;
+            font-size: 18px;
+            color: #2a2a2a;
+            text-align: center;
+        }
+        #game-container, #music-container {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 20px;
+            width: 100%;
+            position: relative;
+            z-index: 1;
+        }
+        #maze {
+            display: grid;
+            grid-template-columns: repeat(10, 32px);
+            grid-template-rows: repeat(10, 32px);
+            border: 4px solid #2a2a2a;
+            background-color: #fff;
+            image-rendering: pixelated;
+        }
+        .cell {
+            width: 32px;
+            height: 32px;
+            box-sizing: border-box;
+        }
+        .wall {
+            background-color: #2a2a2a;
+        }
+        .path {
+            background-color: #fff;
+        }
+        .player {
+            background-color: #ff4040;
+            border: 2px solid #2a2a2a;
+        }
+        .ai-player {
+            background-color: #4682b4;
+            border: 2px solid #2a2a2a;
+        }
+        .exit {
+            background-color: #9400d3;
+            border: 2px solid #2a2a2a;
+        }
+        #game-status, #music-status {
+            margin-top: 15px;
+            font-size: 20px;
+            color: #2a2a2a;
+            text-align: center;
+        }
+        #countdown {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            color: #ff4040;
+            text-shadow: 2px 2px #2a2a2a;
+            z-index: 2;
+            display: none;
+        }
+        #music-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .music-type-button {
+            padding: 10px 20px;
+            border: 3px solid #2a2a2a;
+            border-radius: 0;
+            cursor: pointer;
+            font-size: 20px;
+            font-family: 'VT323', monospace;
+            background-color: #4682b4;
+            color: #fff;
+        }
+        .music-type-button:hover {
+            background-color: #4169e1;
+        }
+        #song-link {
+            font-size: 18px;
+            color: #2a2a2a;
+            text-align: center;
+            margin-top: 10px;
+        }
+        #song-link a {
+            color: #ff4040;
+            text-decoration: none;
+        }
+        #song-link a:hover {
+            text-decoration: underline;
+        }
+        #return-button, #music-return-button {
+            padding: 10px 20px;
+            border: 3px solid #2a2a2a;
+            border-radius: 0;
+            cursor: pointer;
+            font-size: 20px;
+            background-color: #ff4040;
+            color: #fff;
+            margin-top: 15px;
+            font-family: 'VT323', monospace;
+        }
+        #return-button:hover, #music-return-button:hover {
+            background-color: #b22222;
+        }
+        #music-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            display: none;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+</head>
+<body>
+    <canvas id="music-canvas"></canvas>
+    <h1>AI Chat & Pixel Games</h1>
+    <div id="chat-container"></div>
+    <div id="input-container">
+        <input type="text" id="user-input" placeholder="Type a message or use voice..." />
+        <button id="send-button">Send</button>
+        <button id="mic-button">🎙</button>
+        <button id="connect-button">Connect to Arduino</button>
+        <button id="game-button">Play Maze</button>
+        <button id="music-button">Play Music</button>
+    </div>
+    <div id="status"></div>
+    <div id="game-container">
+        <div id="countdown"></div>
+        <div id="maze"></div>
+        <div id="game-status">Use arrow keys to race AI!</div>
+        <button id="return-button">Back to Chat</button>
+    </div>
+    <div id="music-container">
+        <div id="music-buttons">
+            <button class="music-type-button" data-type="children">Children's</button>
+            <button class="music-type-button" data-type="punk">Punk</button>
+            <button class="music-type-button" data-type="rock">Rock</button>
+            <button class="music-type-button" data-type="pop">Pop</button>
+        </div>
+        <div id="music-status">Choose a music type!</div>
+        <div id="song-link"></div>
+        <button id="music-return-button">Back to Chat</button>
+    </div>
+
+    <script>
+        const API_KEY = "AIzaSyB145hfKm5hiddFoN9pf8-iBuDf8Vtn3OU";
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+        const chatContainer = document.getElementById("chat-container");
+        const inputContainer = document.getElementById("input-container");
+        const userInput = document.getElementById("user-input");
+        const sendButton = document.getElementById("send-button");
+        const micButton = document.getElementById("mic-button");
+        const connectButton = document.getElementById("connect-button");
+        const gameButton = document.getElementById("game-button");
+        const musicButton = document.getElementById("music-button");
+        const statusDiv = document.getElementById("status");
+        const gameContainer = document.getElementById("game-container");
+        const mazeDiv = document.getElementById("maze");
+        const gameStatus = document.getElementById("game-status");
+        const countdownDiv = document.getElementById("countdown");
+        const returnButton = document.getElementById("return-button");
+        const musicContainer = document.getElementById("music-container");
+        const musicStatus = document.getElementById("music-status");
+        const songLink = document.getElementById("song-link");
+        const musicReturnButton = document.getElementById("music-return-button");
+        const musicCanvas = document.getElementById("music-canvas");
+        const ctx = musicCanvas.getContext("2d");
+
+        let serialPort = null;
+        let writer = null;
+        let reader = null;
+        let maze = null;
+        let playerPos = { row: 1, col: 1 };
+        let aiPos = { row: 1, col: 2 }; // AI starts next to player
+        let gameActive = false;
+        let expectingMusicResponse = false;
+        let expectingBoredResponse = false;
+        let expectingDramaResponse = false;
+        let dramaState = null;
+        let notes = [];
+        let lastInteractionTime = Date.now();
+        let inactivityTimeout = null;
+        let useLocalMode = false;
+        let aiPath = [];
+        let aiMoveInterval = null;
+
+        // Music playlists (YouTube links)
+        const musicPlaylists = {
+            children: [
+                { title: "Twinkle Twinkle Little Star", url: "https://www.youtube.com/watch?v=yCjJyiqpAuU" },
+                { title: "Wheels on the Bus", url: "https://www.youtube.com/watch?v=e_04ZrNroTo" },
+                { title: "Baby Shark", url: "https://www.youtube.com/watch?v=XqZsoesa55w" },
+                { title: "If You're Happy and You Know It", url: "https://www.youtube.com/watch?v=71hqRT9U0wg" },
+                { title: "Old MacDonald Had a Farm", url: "https://www.youtube.com/watch?v=_6HzoUcx3eo" }
+            ],
+            punk: [
+                { title: "Blitzkrieg Bop - Ramones", url: "https://www.youtube.com/watch?v=skdE0KAFCEA" },
+                { title: "Holiday in Cambodia - Dead Kennedys", url: "https://www.youtube.com/watch?v=-KTsXHXMkJA" },
+                { title: "Anarchy in the U.K. - Sex Pistols", url: "https://www.youtube.com/watch?v=cBojbjoMttI" },
+                { title: "Ever Fallen in Love - Buzzcocks", url: "https://www.youtube.com/watch?v=ppw1z--sAcg" },
+                { title: "Punk Rock Girl - The Dead Milkmen", url: "https://www.youtube.com/watch?v=szfIti4UyvU" }
+            ],
+            rock: [
+                { title: "Sweet Child O' Mine - Guns N' Roses", url: "https://www.youtube.com/watch?v=1w7OgIMMRc4" },
+                { title: "Bohemian Rhapsody", url: "https://www.youtube.com/watch?v=fJ9rUzIMcZQ" },
+                { title: "Smells Like Teen Spirit - Nirvana", url: "https://www.youtube.com/watch?v=hTWKbfoikeg" },
+                { title: "Back in Black - AC/DC", url: "https://www.youtube.com/watch?v=pAgnJDJN4VA" },
+                { title: "Dream On - Aerosmith", url: "https://www.youtube.com/watch?v=89dGC8de0CA" }
+            ],
+            pop: [
+                { title: "Shape of You - Ed Sheeran", url: "https://www.youtube.com/watch?v=JGwWNGJdvx8" },
+                { title: "Uptown Funk - Mark Ronson ft. Bruno Mars", url: "https://www.youtube.com/watch?v=OPf0YbXqDm0" },
+                { title: "Rolling in the Deep - Adele", url: "https://www.youtube.com/watch?v=rYEDA3JcQqw" },
+                { title: "Bad Guy - Billie Eilish", url: "https://www.youtube.com/watch?v=DyDfgMOUjCI" },
+                { title: "Blinding Lights - The Weeknd", url: "https://www.youtube.com/watch?v=4NRXx6U8ABQ" }
+            ]
+        };
+
+        // Drama database with verified online availability
+        const dramaDatabase = [
+            { title: "The Three Teams", type: "suspense", actors: ["Zhang Yi", "Qin Hao"], style: "crime", platform: "iQIYI", url: "https://www.iqiyi.com/v_1x7z7z7z7z7.html" },
+            { title: "Beautiful Time with You", type: "youth", actors: ["Lin Xingchen", "Lu Yibai"], style: "romance", platform: "iQIYI", url: "https://www.iqiyi.com/v_19rr7q3q3c.html" },
+            { title: "True Beauty", type: "romance", actors: ["Moon Ga-young", "Cha Eun-woo"], style: "youth", platform: "Viki", url: "https://www.viki.com/tv/37374c-true-beauty" },
+            { title: "Vincenzo", type: "suspense", actors: ["Song Joong-ki", "Jeon Yeo-been"], style: "crime", platform: "Netflix", url: "https://www.netflix.com/title/81361558" },
+            { title: "Business Proposal", type: "romance", actors: ["Ahn Hyo-seop", "Kim Se-jeong"], style: "comedy", platform: "Netflix", url: "https://www.netflix.com/title/81526877" },
+            { title: "The Penthouse", type: "suspense", actors: ["Lee Ji-ah", "Kim So-yeon"], style: "drama", platform: "Viki", url: "https://www.viki.com/tv/37429c-the-penthouse" },
+            { title: "Weightlifting Fairy", type: "youth", actors: ["Lee Sung-kyung", "Nam Joo-hyuk"], style: "romance", platform: "Viki", url: "https://www.viki.com/tv/32249c-weightlifting-fairy-kim-bok-joo" },
+            { title: "Descendants of the Sun", type: "romance", actors: ["Song Joong-ki", "Song Hye-kyo"], style: "military", platform: "Viki", url: "https://www.viki.com/tv/23205c-descendants-of-the-sun" }
+        ];
+
+        // Maze designs
+        const mazeDesigns = [
+            [
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 1, 1, 1, 0, 1, 0, 1, 1, 0],
+                [0, 1, 0, 1, 0, 1, 0, 0, 1, 0],
+                [0, 1, 1, 1, 1, 1, 1, 0, 1, 0],
+                [0, 0, 0, 0, 0, 0, 1, 0, 1, 0],
+                [0, 1, 1, 1, 1, 0, 1, 1, 1, 0],
+                [0, 1, 0, 0, 1, 0, 0, 0, 1, 0],
+                [0, 1, 0, 1, 1, 1, 1, 0, 1, 0],
+                [0, 1, 1, 0, 0, 0, 1, 0, 1, 2],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            ],
+            [
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 1, 1, 1, 0, 1, 1, 1, 1, 0],
+                [0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
+                [0, 1, 1, 1, 1, 1, 1, 0, 1, 0],
+                [0, 1, 0, 0, 0, 0, 1, 0, 1, 0],
+                [0, 1, 1, 1, 1, 0, 1, 1, 1, 0],
+                [0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+                [0, 1, 1, 0, 1, 1, 1, 0, 1, 0],
+                [0, 1, 0, 0, 0, 0, 1, 1, 1, 2],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            ],
+            [
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 1, 1, 0, 0, 1, 0, 1, 0, 0],
+                [0, 1, 1, 1, 0, 1, 0, 1, 1, 0],
+                [0, 0, 0, 1, 0, 1, 0, 0, 1, 0],
+                [0, 1, 1, 1, 1, 1, 1, 0, 1, 0],
+                [0, 1, 0, 0, 0, 0, 1, 0, 1, 0],
+                [0, 1, 1, 1, 1, 0, 1, 1, 1, 0],
+                [0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+                [0, 1, 1, 0, 1, 1, 1, 0, 1, 2],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            ]
+        ];
+
+        // Initialize maze
+        function initMaze() {
+            const randomIndex = Math.floor(Math.random() * mazeDesigns.length);
+            maze = mazeDesigns[randomIndex].map(row => [...row]);
+            playerPos = { row: 1, col: 1 };
+            aiPos = { row: 1, col: 2 }; // AI starts adjacent
+            gameActive = false; // Wait for countdown
+            aiPath = [];
+            renderMaze();
+            gameStatus.textContent = "Race AI to the exit!";
+            startCountdown();
+        }
+
+        // Render maze
+        function renderMaze() {
+            mazeDiv.innerHTML = "";
+            mazeDiv.style.display = "grid";
+            for (let row = 0; row < 10; row++) {
+                for (let col = 0; col < 10; col++) {
+                    const cell = document.createElement("div");
+                    cell.classList.add("cell");
+                    if (maze[row][col] === 0) {
+                        cell.classList.add("wall");
+                    } else if (maze[row][col] === 1) {
+                        cell.classList.add("path");
+                    } else if (maze[row][col] === 2) {
+                        cell.classList.add("exit");
+                    }
+                    if (playerPos.row === row && playerPos.col === col) {
+                        cell.classList.add("player");
+                    } else if (aiPos.row === row && aiPos.col === col) {
+                        cell.classList.add("ai-player");
+                    }
+                    mazeDiv.appendChild(cell);
+                }
+            }
+        }
+
+        // Start countdown
+        function startCountdown() {
+            countdownDiv.style.display = "block";
+            let count = 3;
+            countdownDiv.textContent = count;
+            const interval = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    countdownDiv.textContent = count;
+                } else {
+                    countdownDiv.textContent = "Go!";
+                    setTimeout(() => {
+                        countdownDiv.style.display = "none";
+                        gameActive = true;
+                        startAIMovement();
+                        const response = "Maze started!";
+                        displayMessage(response, false);
+                        sendToArduino(response);
+                    }, 1000);
+                    clearInterval(interval);
+                }
+            }, 1000);
+        }
+
+        // BFS to find shortest path for AI
+        function findPath(start, end) {
+            const queue = [[start.row, start.col]];
+            const visited = new Set([`${start.row},${start.col}`]);
+            const parent = new Map();
+            const directions = [[0, 1], [1, 0], [0, -1], [-1, 0]]; // Right, Down, Left, Up
+
+            while (queue.length > 0) {
+                const [row, col] = queue.shift();
+                if (row === end.row && col === end.col) {
+                    // Reconstruct path
+                    const path = [];
+                    let current = `${row},${col}`;
+                    while (current !== `${start.row},${start.col}`) {
+                        path.unshift(current.split(',').map(Number));
+                        current = parent.get(current);
+                    }
+                    return path;
+                }
+                for (const [dr, dc] of directions) {
+                    const newRow = row + dr;
+                    const newCol = col + dc;
+                    const key = `${newRow},${newCol}`;
+                    if (
+                        newRow >= 0 && newRow < 10 &&
+                        newCol >= 0 && newCol < 10 &&
+                        maze[newRow][newCol] !== 0 &&
+                        !visited.has(key)
+                    ) {
+                        queue.push([newRow, newCol]);
+                        visited.add(key);
+                        parent.set(key, `${row},${col}`);
+                    }
+                }
+            }
+            return []; // No path found
+        }
+
+        // Start AI movement
+        function startAIMovement() {
+            if (aiMoveInterval) clearInterval(aiMoveInterval);
+            aiPath = findPath(aiPos, { row: 8, col: 9 }); // Exit at (8,9)
+            aiMoveInterval = setInterval(() => {
+                if (!gameActive || aiPath.length === 0) {
+                    clearInterval(aiMoveInterval);
+                    return;
+                }
+                const [nextRow, nextCol] = aiPath.shift();
+                aiPos = { row: nextRow, col: nextCol };
+                renderMaze();
+                if (aiPos.row === 8 && aiPos.col === 9) {
+                    gameActive = false;
+                    gameStatus.textContent = "AI wins!";
+                    const response = "AI wins!";
+                    displayMessage(response, false);
+                    sendToArduino(response);
+                    clearInterval(aiMoveInterval);
+                    document.removeEventListener("keydown", handleKeyPress);
+                }
+            }, 500); // AI moves every 500ms
+        }
+
+        // Move player
+        function movePlayer(direction) {
+            if (!gameActive) return;
+            let newRow = playerPos.row;
+            let newCol = playerPos.col;
+
+            switch (direction) {
+                case 'up': newRow--; break;
+                case 'down': newRow++; break;
+                case 'left': newCol--; break;
+                case 'right': newCol++; break;
+            }
+
+            if (newRow >= 0 && newRow < 10 && newCol >= 0 && newCol < 10 && maze[newRow][newCol] !== 0) {
+                playerPos.row = newRow;
+                playerPos.col = newCol;
+                renderMaze();
+                if (maze[newRow][newCol] === 2) {
+                    gameActive = false;
+                    gameStatus.textContent = "You win!";
+                    const response = "You win!";
+                    displayMessage(response, false);
+                    sendToArduino(response);
+                    clearInterval(aiMoveInterval);
+                    document.removeEventListener("keydown", handleKeyPress);
+                }
+            }
+            lastInteractionTime = Date.now();
+        }
+
+        // Select random song and start animation
+        function selectRandomSong(type) {
+            const playlist = musicPlaylists[type];
+            if (playlist && playlist.length > 0) {
+                const randomIndex = Math.floor(Math.random() * playlist.length);
+                const song = playlist[randomIndex];
+                musicStatus.textContent = `Playing: ${song.title}`;
+                songLink.innerHTML = `<a href="${song.url}" target="_blank">${song.title}</a>`;
+                const response = `Play ${song.title.slice(0, 5)}!`;
+                displayMessage(response, false);
+                sendToArduino(response);
+            } else {
+                const response = "No songs!";
+                displayMessage(response, false);
+                sendToArduino(response);
+            }
+            lastInteractionTime = Date.now();
+        }
+
+        // Local drama recommendation
+        function recommendDramaLocal() {
+            const { type, actors, exclude } = dramaState;
+            let candidates = dramaDatabase.filter(drama => {
+                if (exclude.includes(drama.title)) return false;
+                if (actors.length > 0 && actors.some(actor => drama.actors.includes(actor))) {
+                    return true; // Prioritize actor match
+                }
+                if (type) {
+                    const typeMatch = drama.type.toLowerCase().includes(type.toLowerCase()) ||
+                        (type.match(/suspense|mystery|crime|intense/i) && drama.type === "suspense") ||
+                        (type.match(/youth|campus/i) && drama.type === "youth");
+                    if (typeMatch) return true;
+                }
+                return false;
+            }).sort((a, b) => {
+                let scoreA = 0, scoreB = 0;
+                if (actors.length > 0 && actors.some(actor => a.actors.includes(actor))) scoreA += 4;
+                if (actors.length > 0 && actors.some(actor => b.actors.includes(actor))) scoreB += 4;
+                if (type) {
+                    if (a.type.toLowerCase().includes(type.toLowerCase()) ||
+                        (type.match(/suspense|mystery|crime|intense/i) && drama.type === "suspense") ||
+                        (type.match(/youth|campus/i) && drama.type === "youth")) scoreA += 2;
+                    if (b.type.toLowerCase().includes(type.toLowerCase()) ||
+                        (type.match(/suspense|mystery|crime|intense/i) && drama.type === "suspense") ||
+                        (type.match(/youth|campus/i) && drama.type === "youth")) scoreB += 2;
+                }
+                return scoreB - scoreA;
+            });
+
+            if (candidates.length === 0) {
+                candidates = dramaDatabase.filter(drama => {
+                    if (exclude.includes(drama.title)) return false;
+                    return type && (
+                        drama.type.toLowerCase().includes(type.toLowerCase()) ||
+                        (type.match(/suspense|mystery|crime|intense/i) && drama.type === "suspense") ||
+                        (type.match(/youth|campus/i) && drama.type === "youth")
+                    );
+                });
+            }
+
+            if (candidates.length === 0) {
+                candidates = dramaDatabase.filter(drama => !exclude.includes(drama.title));
+            }
+
+            const drama = candidates[Math.floor(Math.random() * candidates.length)];
+            dramaState.currentRecommendation = drama.title;
+            return `Try ${drama.title.slice(0, 8)}!`; // Limit to 10 chars with "Try "
+        }
+
+        // Send message to Arduino
+        async function sendToArduino(message) {
+            if (serialPort && writer) {
+                try {
+                    let cleanMessage = message.replace(/[^a-zA-Z0-9 !,.?]/g, ''); // Strict ASCII
+                    if (cleanMessage.length === 0) {
+                        cleanMessage = "No response";
+                    }
+                    const encoder = new TextEncoder();
+                    const data = cleanMessage + "\n";
+                    await writer.write(encoder.encode(data));
+                    console.log("Sent to Arduino:", cleanMessage);
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                } catch (error) {
+                    console.error("Serial Write Error:", error);
+                    statusDiv.textContent = `Failed to send to Arduino: ${error.message}`;
+                }
+            } else {
+                statusDiv.textContent = "Arduino not connected, please connect first.";
+            }
+        }
+
+        // Display chat message
+        function displayMessage(content, isUser) {
+            const messageDiv = document.createElement("div");
+            messageDiv.classList.add("message");
+            messageDiv.classList.add(isUser ? "user-message" : "ai-message");
+            messageDiv.textContent = content;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            lastInteractionTime = Date.now();
+        }
+
+        // Connect to Arduino serial port
+        async function connectSerial() {
+            try {
+                if (!navigator.serial || typeof navigator.serial.requestPort !== 'function') {
+                    throw new Error("Browser does not support Web Serial API. Use Chrome/Edge (89+) and run via HTTPS or localhost.");
+                }
+
+                statusDiv.textContent = "Select Arduino port (COM6, not Bluetooth)";
+                serialPort = await navigator.serial.requestPort();
+                if (!serialPort) {
+                    statusDiv.textContent = "No serial port selected.";
+                    return;
+                }
+                await serialPort.open({ baudRate: 115200, bufferSize: 1024, flowControl: 'none' });
+                writer = serialPort.writable.getWriter();
+                reader = serialPort.readable.getReader();
+                statusDiv.textContent = "Connected to Arduino (COM6)";
+                connectButton.disabled = true;
+            } catch (error) {
+                console.error("Serial Connection Error:", error);
+                let errorMessage = `Connection failed: ${error.message}`;
+                if (error.message.includes("Web Serial API")) {
+                    errorMessage = "Use Chrome/Edge and run via localhost.";
+                } else if (error.message.includes("port")) {
+                    errorMessage = "Check Arduino connection (COM6) and driver.";
+                }
+                statusDiv.textContent = errorMessage;
+                serialPort = null;
+                writer = null;
+                reader = null;
+            }
+        }
+
+        // Send message to AI and Arduino
+        async function sendMessage() {
+            const prompt = userInput.value.trim();
+            if (!prompt) return;
+
+            displayMessage(prompt, true);
+            userInput.value = "";
+            statusDiv.textContent = "Sending to AI...";
+
+            try {
+                let aiText = "";
+                let oledText = ""; // For OLED display
+                if (expectingMusicResponse) {
+                    const affirmativeResponses = ["yes", "sure", "ok", "okay", "yep", "yeah"];
+                    if (affirmativeResponses.some(resp => prompt.toLowerCase().includes(resp))) {
+                        musicButton.style.display = "inline-block";
+                        aiText = "Pick music!";
+                        oledText = "Pick music!";
+                    } else {
+                        aiText = "Try later.";
+                        oledText = "Try later.";
+                    }
+                    expectingMusicResponse = false;
+                } else if (expectingBoredResponse) {
+                    const gameResponses = ["game", "games", "play", "遊戲"];
+                    const musicResponses = ["music", "song", "songs", "音樂"];
+                    if (gameResponses.some(resp => prompt.toLowerCase().includes(resp))) {
+                        gameButton.style.display = "inline-block";
+                        aiText = "Enjoy maze!";
+                        oledText = "Enjoy maze!";
+                    } else if (musicResponses.some(resp => prompt.toLowerCase().includes(resp))) {
+                        musicButton.style.display = "inline-block";
+                        aiText = "Pick music!";
+                        oledText = "Pick music!";
+                    } else {
+                        aiText = "Do you want to play games or listen to music?";
+                        oledText = "Do you want to play games or listen to music?";
+                    }
+                    expectingBoredResponse = false;
+                } else if (expectingDramaResponse) {
+                    if (dramaState.step === "questions") {
+                        if (prompt.match(/suspense|mystery|crime|youth|campus|romance/i)) {
+                            dramaState.type = prompt;
+                        } else if (prompt.trim()) {
+                            dramaState.actors = dramaState.actors.concat(prompt.split(/[,，\s]+/).filter(a => a));
+                        }
+                        const questions = [
+                            { web: "Drama type?", oled: "Drama type?" },
+                            { web: "Name actor?", oled: "Name actor?" },
+                            { web: "Intense or light?", oled: "Intense or light?" }
+                        ];
+                        if (dramaState.questionsAsked.length < questions.length && Math.random() > 0.5) {
+                            const remainingQuestions = questions.filter(q => !dramaState.questionsAsked.includes(q.oled));
+                            const nextQuestion = remainingQuestions[Math.floor(Math.random() * remainingQuestions.length)];
+                            dramaState.questionsAsked.push(nextQuestion.oled);
+                            aiText = nextQuestion.web;
+                            oledText = nextQuestion.oled;
+                        } else {
+                            dramaState.step = "recommend";
+                            aiText = recommendDramaLocal();
+                            oledText = aiText;
+                        }
+                    } else if (dramaState.step === "recommend") {
+                        if (prompt.toLowerCase().includes("看過了") || prompt.toLowerCase().includes("seen") || prompt.toLowerCase().includes("watched")) {
+                            dramaState.exclude.push(dramaState.currentRecommendation);
+                            aiText = recommendDramaLocal();
+                            oledText = aiText;
+                        } else if (prompt.includes("好耶")) {
+                            aiText = "😊";
+                            oledText = "Smile!";
+                            expectingDramaResponse = false;
+                            dramaState = null;
+                        } else if (prompt.toLowerCase().includes("great") || prompt.toLowerCase().includes("awesome")) {
+                            aiText = "Great choice!";
+                            oledText = "Great choice!";
+                            expectingDramaResponse = false;
+                            dramaState = null;
+                        } else if (prompt.toLowerCase().includes("wrong") || prompt.toLowerCase().includes("not him") || prompt.toLowerCase().includes("incorrect")) {
+                            dramaState.exclude.push(dramaState.currentRecommendation);
+                            aiText = `Try ${dramaState.currentRecommendation.slice(0, 8)}!`;
+                            oledText = `Try ${dramaState.currentRecommendation.slice(0, 8)}!`;
+                        } else {
+                            aiText = "Like drama?";
+                            oledText = "Like drama?";
+                        }
+                    }
+                } else {
+                    const negativeMoods = ["sad", "bad", "unhappy", "depressed", "down"];
+                    if (negativeMoods.some(mood => prompt.toLowerCase().includes(mood))) {
+                        aiText = "Hear music?";
+                        oledText = "Hear music?";
+                        expectingMusicResponse = true;
+                    } else if (prompt.toLowerCase().includes("bored") || prompt.includes("無聊")) {
+                        aiText = "Do you want to play games or listen to music?";
+                        oledText = "Do you want to play games or listen to music?";
+                        expectingBoredResponse = true;
+                    } else if (prompt.toLowerCase().includes("drama drought") || prompt.includes("劇荒")) {
+                        dramaState = { 
+                            step: "questions", 
+                            type: "", 
+                            actors: [], 
+                            exclude: [], 
+                            currentRecommendation: "",
+                            questionsAsked: []
+                        };
+                        expectingDramaResponse = true;
+                        aiText = "It’s terrible! It’s like the end of the world if there is no drama to watch!!";
+                        oledText = "It’s terrible! It’s like the end of the world if there is no drama to watch!!";
+                        displayMessage(aiText, false);
+                        await sendToArduino(oledText);
+                        const questions = [
+                            { web: "Drama type?", oled: "Drama type?" },
+                            { web: "Name actor?", oled: "Name actor?" },
+                            { web: "Intense or light?", oled: "Intense or light?" }
+                        ];
+                        const firstQuestion = questions[Math.floor(Math.random() * questions.length)];
+                        dramaState.questionsAsked.push(firstQuestion.oled);
+                        aiText = firstQuestion.web;
+                        oledText = firstQuestion.oled;
+                    } else {
+                        if (useLocalMode) {
+                            aiText = "Try drama!";
+                            oledText = "Try drama!";
+                        } else {
+                            const aiResponse = await fetch(API_URL, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    contents: [{ parts: [{ text: prompt + " (Answer in English, 10 chars or less)" }] }]
+                                })
+                            });
+
+                            if (!aiResponse.ok) {
+                                const errorText = await aiResponse.text();
+                                let errorMessage = `API request failed: ${aiResponse.status}`;
+                                try {
+                                    const errorJson = JSON.parse(errorText);
+                                    if (errorJson.error && errorJson.error.message) {
+                                        errorMessage = errorJson.error.message;
+                                    }
+                                } catch (e) {
+                                    errorMessage += ` - ${errorText}`;
+                                }
+                                if (errorMessage.includes("API key")) {
+                                    useLocalMode = true;
+                                    aiText = "Try drama!";
+                                    oledText = "Try drama!";
+                                    displayMessage("API key invalid, using local mode.", false);
+                                    await sendToArduino(oledText);
+                                } else {
+                                    throw new Error(errorMessage);
+                                }
+                            } else {
+                                const data = await aiResponse.json();
+                                if (!data.candidates || !data.candidates[0].content.parts[0].text) {
+                                    throw new Error("No valid AI response");
+                                }
+                                aiText = data.candidates[0].content.parts[0].text;
+                                aiText = aiText.replace(/[\r\n]+/g, ' ').trim().substring(0, 10);
+                                oledText = data.candidates[0].content.parts[0].text.replace(/[\r\n]+/g, ' ').trim(); // Full response for OLED
+                            }
+                        }
+                    }
+                }
+
+                displayMessage(aiText, false);
+                await sendToArduino(oledText || aiText); // Send full AI response to OLED
+                statusDiv.textContent = "Sent to Arduino OLED";
+            } catch (error) {
+                console.error("Error:", error);
+                let displayError = "Error, try again.";
+                let aiText = "Try later.";
+                let oledText = "Try later.";
+                if (error.message.includes("API key")) {
+                    useLocalMode = true;
+                    displayError = "API key invalid, using local mode.";
+                    aiText = "Try drama!";
+                    oledText = "Try drama!";
+                    displayMessage(displayError, false);
+                    displayMessage(aiText, false);
+                    await sendToArduino(oledText);
+                } else if (error.message.includes("API request failed")) {
+                    displayError = `API error: ${error.message}`;
+                    displayMessage(displayError, false);
+                    displayMessage(aiText, false);
+                    await sendToArduino(oledText);
+                }
+                statusDiv.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        // Switch to maze game interface
+        gameButton.addEventListener("click", () => {
+            chatContainer.style.display = "none";
+            inputContainer.style.display = "none";
+            statusDiv.style.display = "none";
+            gameButton.style.display = "none";
+            musicButton.style.display = "none";
+            gameContainer.style.display = "flex";
+            initMaze();
+            document.addEventListener("keydown", handleKeyPress);
+        });
+
+        // Switch to music interface
+        musicButton.addEventListener("click", () => {
+            chatContainer.style.display = "none";
+            inputContainer.style.display = "none";
+            statusDiv.style.display = "none";
+            gameButton.style.display = "none";
+            musicButton.style.display = "none";
+            musicContainer.style.display = "flex";
+            musicStatus.textContent = "Choose a music type!";
+            songLink.innerHTML = "";
+            const response = "Music opened!";
+            displayMessage(response, false);
+            sendToArduino(response);
+        });
+
+        // Handle music type buttons
+        document.querySelectorAll(".music-type-button").forEach(button => {
+            button.addEventListener("click", () => {
+                const type = button.getAttribute("data-type");
+                selectRandomSong(type);
+            });
+        });
+
+        // Handle maze keyboard input
+        function handleKeyPress(event) {
+            if (!gameActive) return;
+            switch (event.key) {
+                case "ArrowUp": movePlayer("up"); break;
+                case "ArrowDown": movePlayer("down"); break;
+                case "ArrowLeft": movePlayer("left"); break;
+                case "ArrowRight": movePlayer("right"); break;
+            }
+            event.preventDefault();
+        }
+
+        // Return to chat from maze
+        returnButton.addEventListener("click", () => {
+            chatContainer.style.display = "block";
+            inputContainer.style.display = "flex";
+            statusDiv.style.display = "block";
+            gameContainer.style.display = "none";
+            gameButton.style.display = "none";
+            musicButton.style.display = "none";
+            gameActive = false;
+            if (aiMoveInterval) clearInterval(aiMoveInterval);
+            const response = "Back to chat!";
+            displayMessage(response, false);
+            sendToArduino(response);
+            document.removeEventListener("keydown", handleKeyPress);
+        });
+
+        // Return to chat from music
+        musicReturnButton.addEventListener("click", () => {
+            chatContainer.style.display = "block";
+            inputContainer.style.display = "flex";
+            statusDiv.style.display = "block";
+            musicContainer.style.display = "none";
+            gameButton.style.display = "none";
+            musicButton.style.display = "none";
+            const response = "Back to chat!";
+            displayMessage(response, false);
+            sendToArduino(response);
+            musicCanvas.style.display = "none";
+            notes = [];
+        });
+
+        // Bind button events
+        sendButton.addEventListener("click", sendMessage);
+        connectButton.addEventListener("click", connectSerial);
+
+        userInput.addEventListener("keypress", (event) => {
+            if (event.key === "Enter") {
+                sendMessage();
+            }
+        });
+
+        micButton.addEventListener("click", () => {
+            if (!recognition) return;
+            if (isRecording) {
+                recognition.stop();
+            } else {
+                try {
+                    recognition.start();
+                } catch (error) {
+                    statusDiv.textContent = "Failed to start speech recognition.";
+                }
+            }
+        });
+
+        // Initialize speech recognition
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        let isRecording = false;
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = "zh-TW";
+            recognition.interimResults = true;
+            recognition.continuous = false;
+
+            recognition.onstart = () => {
+                isRecording = true;
+                micButton.classList.add("recording");
+                statusDiv.textContent = "Listening...";
+            };
+
+            recognition.onresult = (event) => {
+                const transcript = Array.from(event.results)
+                    .map(result => result[0].transcript)
+                    .join("");
+                userInput.value = transcript;
+                if (event.results[0].isFinal) {
+                    sendMessage();
+                }
+            };
+
+            recognition.onend = () => {
+                isRecording = false;
+                micButton.classList.remove("recording");
+                statusDiv.textContent = "";
+            };
+
+            recognition.onerror = (event) => {
+                isRecording = false;
+                micButton.classList.remove("recording");
+                statusDiv.textContent = `Speech recognition error: ${event.error}`;
+            };
+        } else {
+            micButton.disabled = true;
+            statusDiv.textContent = "Speech recognition not supported.";
+        }
+
+        // Resize canvas on window resize
+        window.addEventListener('resize', () => {
+            musicCanvas.width = window.innerWidth;
+            musicCanvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>
